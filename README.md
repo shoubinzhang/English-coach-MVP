@@ -11,7 +11,7 @@ Four modes, one app:
 
 - Next.js 14 (App Router) + TypeScript
 - SQLite via Node's built-in `node:sqlite` (file at `./data/coach.db`)
-- Talks to Claude via either the **Anthropic API SDK** (with `ANTHROPIC_API_KEY`) or the **Claude Agent SDK** (using a local `claude login` Pro/Max subscription)
+- Three model-auth paths (priority: Gemini > Anthropic API key > Claude Agent SDK)
 - Web Speech API for browser STT/TTS (free, Chrome/Edge only)
 - Azure Speech SDK for pronunciation assessment (M4 only)
 
@@ -22,28 +22,33 @@ npm install
 cp .env.example .env
 ```
 
-Then **pick one** auth option and edit `.env`:
+Then pick **one** auth option:
 
-### Option A — Anthropic API key (pay-as-you-go)
+### Option A — Google Gemini 2.5 Flash (free, no card)
 
-1. Sign up at <https://console.anthropic.com>, add a billing method, create a key.
-2. In `.env`, set `ANTHROPIC_API_KEY=sk-ant-...`.
-3. You get schema-enforced JSON output and prompt caching, which makes each conversation turn cheaper than the first.
+1. Sign in at <https://aistudio.google.com> with any Google account.
+2. Top-left "Get API key" → create one.
+3. In `.env`: `GEMINI_API_KEY=your-key-here`.
 
-### Option B — Your Claude Pro/Max subscription via Claude Code CLI
+Free tier (~15 RPM, 1M tokens/min) is plenty for personal use.
 
-If you already pay for Claude.ai Pro or Max and only want to run this locally:
+### Option B — Anthropic API key (pay-as-you-go, best quality)
+
+1. Sign up at <https://console.anthropic.com>, add a card, create a key.
+2. In `.env`: `ANTHROPIC_API_KEY=sk-ant-...`.
+
+Schema-enforced JSON output and prompt caching. ~$3-8/month at 30 min/day with `claude-opus-4-7`.
+
+### Option C — Your Claude Pro/Max subscription (no extra cost)
 
 ```bash
 npm install -g @anthropic-ai/claude-code
-claude login                  # browser opens, sign in
+claude login           # opens browser, sign in
 ```
 
-Leave `ANTHROPIC_API_KEY` **unset** (or commented out) in `.env`. The app's `/api/chat` route detects the missing key and falls back to the Claude Agent SDK, which reuses your `claude login` credentials. No API billing.
+Leave **both** `GEMINI_API_KEY` and `ANTHROPIC_API_KEY` unset in `.env`. The app falls back to the Claude Agent SDK, which reuses the local `claude login` credentials.
 
-On Windows the install + login is the same, just run them in cmd / PowerShell.
-
-> Note: this is fine for personal local use. If you turn the app into something hosted for others, you'll need an API key — subscription auth is per-user.
+> **Windows gotcha** — npm publishes an empty `claude-agent-sdk-win32-x64@0.0.0` as the "latest" tag. The package.json here pins `0.2.138` (with the actual binary) in `optionalDependencies` so `npm install` grabs the right one. If you accidentally ran `npm install @anthropic-ai/claude-agent-sdk-win32-x64` (no version), reinstall with `npm install @anthropic-ai/claude-agent-sdk-win32-x64@0.2.138`.
 
 ### Start the dev server
 
@@ -53,13 +58,22 @@ npm run dev
 
 Open <http://localhost:3000> in **Chrome or Edge** (Web Speech API isn't in Firefox/Safari).
 
+When you load `/chat`, the dev terminal prints the auth path it picked:
+
+```
+[coach] auth: Gemini (gemini-2.5-flash)
+[coach] auth: Anthropic API key (claude-opus-4-7)
+[coach] auth: Claude Agent SDK (claude login)
+```
+
 ## Cost
 
-| Option | Per-month cost (30 min/day chat) |
+| Option | Monthly (30 min/day chat) |
 |---|---|
+| Gemini 2.5 Flash free tier | $0 |
 | Anthropic API + `claude-opus-4-7` | ~$3–8 |
 | Anthropic API + `claude-sonnet-4-6` (set in `src/lib/claude.ts`) | ~$1–3 |
-| Pro/Max subscription via Agent SDK | $0 extra (subscription counts) |
+| Claude Pro/Max subscription via Agent SDK | $0 extra |
 
 ## Future: YouTube import for Shadowing
 
