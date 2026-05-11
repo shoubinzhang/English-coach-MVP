@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getClient, MODEL, COACH_SYSTEM_PROMPT, COACH_SCHEMA } from "@/lib/claude";
-import { getDb } from "@/lib/db";
-import type { ChatTurn, CoachReply, Correction } from "@/lib/types";
+import { getDb, tx } from "@/lib/db";
+import type { ChatTurn, CoachReply } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -53,10 +53,11 @@ export async function POST(req: NextRequest) {
     const insert = db.prepare(
       `INSERT INTO errors (original, corrected, category, explanation) VALUES (?, ?, ?, ?)`,
     );
-    const tx = db.transaction((rows: Correction[]) => {
-      for (const c of rows) insert.run(c.original, c.corrected, c.category, c.explanation);
+    tx(() => {
+      for (const c of parsed.corrections) {
+        insert.run(c.original, c.corrected, c.category, c.explanation);
+      }
     });
-    tx(parsed.corrections);
   }
 
   return NextResponse.json(parsed);

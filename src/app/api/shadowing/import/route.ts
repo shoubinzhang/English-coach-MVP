@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { getDb, tx } from "@/lib/db";
 import { splitSentences } from "@/lib/shadowing";
 
 export const runtime = "nodejs";
@@ -22,13 +22,12 @@ export async function POST(req: NextRequest) {
   );
 
   const sentences = splitSentences(script);
-  const tx = db.transaction(() => {
+  const sourceId = tx(() => {
     const info = insertSrc.run(url ?? "", title.trim());
-    const sourceId = info.lastInsertRowid as number;
-    sentences.forEach((s, i) => insertSent.run(sourceId, i, s));
-    return sourceId;
+    const id = Number(info.lastInsertRowid);
+    sentences.forEach((s, i) => insertSent.run(id, i, s));
+    return id;
   });
-  const sourceId = tx();
   return NextResponse.json({ ok: true, sourceId, count: sentences.length });
 }
 

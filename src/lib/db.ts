@@ -1,17 +1,31 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 
-let db: Database.Database | null = null;
+let db: DatabaseSync | null = null;
 
-export function getDb(): Database.Database {
+export function getDb(): DatabaseSync {
   if (db) return db;
   const dbPath = process.env.DB_PATH ?? "./data/coach.db";
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
+  db = new DatabaseSync(dbPath);
+  db.exec("PRAGMA journal_mode = WAL");
   db.exec(SCHEMA);
   return db;
+}
+
+// Run a callback inside a single transaction. Rolls back on any throw.
+export function tx<T>(fn: () => T): T {
+  const d = getDb();
+  d.exec("BEGIN");
+  try {
+    const out = fn();
+    d.exec("COMMIT");
+    return out;
+  } catch (e) {
+    d.exec("ROLLBACK");
+    throw e;
+  }
 }
 
 const SCHEMA = `
