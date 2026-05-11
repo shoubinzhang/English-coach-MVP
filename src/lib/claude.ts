@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import type { ChatTurn, CoachReply } from "./types";
@@ -64,7 +64,7 @@ export async function coach(history: ChatTurn[], userText: string): Promise<Coac
   if (apiKey && /^sk-ant-[a-zA-Z0-9_-]{40,}$/.test(apiKey)) {
     return coachViaAPI(history, userText);
   }
-  return coachViaAgentSDK(history, userText);
+  return coachViaClaudeBinary(history, userText);
 }
 
 let _api: Anthropic | null = null;
@@ -113,7 +113,20 @@ function resolveBundledClaudeBinary(): string | undefined {
 
 const CLAUDE_BIN = resolveBundledClaudeBinary();
 
-async function coachViaAgentSDK(history: ChatTurn[], userText: string): Promise<CoachReply> {
+// Spawn the bundled `claude` binary directly. Bypasses the Agent SDK JS layer
+// — that layer ends up routing through @anthropic-ai/sdk in Next.js's webpack
+// context and fails to find an apiKey. The binary itself reads the local
+// `claude login` credentials and just works.
+async function coachViaClaudeBinary(
+  history: ChatTurn[],
+  userText: string,
+): Promise<CoachReply> {
+  if (!CLAUDE_BIN) {
+    throw new Error(
+      "No auth: install @anthropic-ai/claude-agent-sdk-<platform>-x64@0.2.138 or set GEMINI_API_KEY / ANTHROPIC_API_KEY",
+    );
+  }
+
   const transcript =
     history.length === 0
       ? ""
@@ -128,42 +141,43 @@ async function coachViaAgentSDK(history: ChatTurn[], userText: string): Promise<
 Return ONLY a JSON object on a single line. No prose, no markdown, no \`\`\` fences. Shape:
 {"reply":"<your 1-3 sentence spoken reply ending with a question>","corrections":[{"original":"...","corrected":"...","category":"grammar|word_choice|naturalness|pronunciation|other","explanation":"..."}]}`;
 
-  let result = "";
-  for await (const message of query({
-    prompt: fullPrompt,
-    options: {
-      model: MODEL,
-      pathToClaudeCodeExecutable: CLAUDE_BIN,
-      systemPrompt: {
-        type: "preset",
-        preset: "claude_code",
-        append: COACH_SYSTEM_PROMPT,
-      },
-      disallowedTools: [
-        "Bash",
-        "Read",
-        "Write",
-        "Edit",
-        "Glob",
-        "Grep",
-        "WebFetch",
-        "WebSearch",
-        "Task",
-        "TodoWrite",
-        "NotebookEdit",
-      ],
-      maxTurns: 1,
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-    },
-  })) {
-    if (message.type === "result" && message.subtype === "success") {
-      result = message.result;
-      break;
-    }
+  const args = [
+    "-p",
+    fullPrompt,
+    "--append-system-prompt",
+    COACH_SYSTEM_PROMPT,
+    "--model",
+    MODEL,
+    "--output-format",
+    "json",
+  ];
+
+  const stdout = await new Promise<string>((resolve, reject) => {
+    const proc = spawn(CLAUDE_BIN, args, { windowsHide: true });
+    let out = "";
+    let err = "";
+    proc.stdout.on("data", (d) => {
+      out += d.toString();
+    });
+    proc.stderr.on("data", (d) => {
+      err += d.toString();
+    });
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code === 0) resolve(out);
+      else reject(new Error(`claude exited ${code}: ${err || out}`.trim()));
+    });
+  });
+
+  // --output-format json returns a wrapper like {type:"result",result:"<text>",...}
+  let assistantText: string;
+  try {
+    const wrapper = JSON.parse(stdout) as { result?: string; type?: string };
+    assistantText = wrapper.result ?? stdout;
+  } catch {
+    assistantText = stdout;
   }
-  if (!result) throw new Error("Agent SDK returned no result");
-  return parseCoachJSON(result);
+  return parseCoachJSON(assistantText);
 }
 
 // ---- Gemini path -----------------------------------------------------------

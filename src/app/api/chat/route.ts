@@ -9,7 +9,7 @@ const authPath = (() => {
   if (process.env.GEMINI_API_KEY) return "Gemini (gemini-2.5-flash)";
   if (/^sk-ant-[a-zA-Z0-9_-]{40,}$/.test(process.env.ANTHROPIC_API_KEY ?? ""))
     return "Anthropic API key (claude-opus-4-7)";
-  return "Claude Agent SDK (claude login)";
+  return "Claude binary subprocess (claude login)";
 })();
 console.log(`[coach] auth: ${authPath}`);
 
