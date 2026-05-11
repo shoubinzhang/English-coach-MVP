@@ -6,6 +6,13 @@ import type { ChatTurn, CoachReply, Correction } from "@/lib/types";
 
 type Turn = ChatTurn & { corrections?: Correction[] };
 
+const STT_LOCALES: { code: string; label: string }[] = [
+  { code: "en-US", label: "English (US)" },
+  { code: "en-IN", label: "English (India) — often handles Asian accents better" },
+  { code: "en-GB", label: "English (UK)" },
+  { code: "en-AU", label: "English (Australia)" },
+];
+
 export default function ChatPage() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState("");
@@ -13,8 +20,16 @@ export default function ChatPage() {
   const [sttSupported, setSttSupported] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [ttsOn, setTtsOn] = useState(true);
+  const [sttLang, setSttLang] = useState("en-US");
+  const [heardSomething, setHeardSomething] = useState(false);
   const recogRef = useRef<any>(null);
   const chatRef = useRef<HTMLDivElement>(null);
+
+  // Restore the user's last STT locale on mount.
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? localStorage.getItem("stt-lang") : null;
+    if (saved && STT_LOCALES.some((l) => l.code === saved)) setSttLang(saved);
+  }, []);
 
   useEffect(() => {
     const SR =
@@ -24,18 +39,24 @@ export default function ChatPage() {
     setSttSupported(!!SR);
     if (!SR) return;
     const r = new SR();
-    r.lang = "en-US";
+    r.lang = sttLang;
     r.interimResults = true;
     r.continuous = false;
     r.onresult = (e: any) => {
       let txt = "";
       for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
+      if (txt) setHeardSomething(true);
       setDraft(txt);
     };
     r.onend = () => setRecording(false);
     r.onerror = () => setRecording(false);
     recogRef.current = r;
-  }, []);
+  }, [sttLang]);
+
+  function changeLang(code: string) {
+    setSttLang(code);
+    if (typeof window !== "undefined") localStorage.setItem("stt-lang", code);
+  }
 
   useEffect(() => {
     chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight });
@@ -58,6 +79,7 @@ export default function ChatPage() {
       return;
     }
     setDraft("");
+    setHeardSomething(false);
     try {
       r.start();
       setRecording(true);
@@ -151,6 +173,29 @@ export default function ChatPage() {
 
       <div className="spacer" />
 
+      {sttSupported && (
+        <div className="row" style={{ marginBottom: "0.5rem", fontSize: "0.85rem" }}>
+          <span className="muted">Speech accent:</span>
+          <select
+            value={sttLang}
+            onChange={(e) => changeLang(e.target.value)}
+            style={{ padding: "0.25rem 0.5rem" }}
+          >
+            {STT_LOCALES.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+          {!recording && draft === "" && !heardSomething && turns.length > 0 && (
+            <span className="muted" style={{ fontSize: "0.75rem" }}>
+              No audio captured last time? Try a different accent, speak louder, or check
+              mic permission.
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="row">
         {sttSupported && (
           <button
@@ -159,13 +204,13 @@ export default function ChatPage() {
             disabled={busy}
             aria-label={recording ? "Stop recording" : "Start recording"}
           >
-            {recording ? "Stop" : "🎤 Mic"}
+            {recording ? "● Listening…" : "🎤 Mic"}
           </button>
         )}
         <input
           type="text"
           value={draft}
-          placeholder="Type or speak…"
+          placeholder={recording ? "Speak slowly and clearly…" : "Type or speak…"}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") send();
