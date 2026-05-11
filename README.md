@@ -10,9 +10,9 @@ Four modes, one app:
 ## Stack
 
 - Next.js 14 (App Router) + TypeScript
-- SQLite via `better-sqlite3` (file at `./data/coach.db`)
-- Anthropic SDK — `claude-opus-4-7` with structured outputs + prompt caching
-- Web Speech API for browser STT/TTS (free, decent enough)
+- SQLite via Node's built-in `node:sqlite` (file at `./data/coach.db`)
+- Talks to Claude via either the **Anthropic API SDK** (with `ANTHROPIC_API_KEY`) or the **Claude Agent SDK** (using a local `claude login` Pro/Max subscription)
+- Web Speech API for browser STT/TTS (free, Chrome/Edge only)
 - Azure Speech SDK for pronunciation assessment (M4 only)
 
 ## Setup
@@ -20,18 +20,46 @@ Four modes, one app:
 ```bash
 npm install
 cp .env.example .env
-# Edit .env: set ANTHROPIC_API_KEY at minimum.
-# Optional: AZURE_SPEECH_KEY + AZURE_SPEECH_REGION for /pronunciation.
+```
+
+Then **pick one** auth option and edit `.env`:
+
+### Option A — Anthropic API key (pay-as-you-go)
+
+1. Sign up at <https://console.anthropic.com>, add a billing method, create a key.
+2. In `.env`, set `ANTHROPIC_API_KEY=sk-ant-...`.
+3. You get schema-enforced JSON output and prompt caching, which makes each conversation turn cheaper than the first.
+
+### Option B — Your Claude Pro/Max subscription via Claude Code CLI
+
+If you already pay for Claude.ai Pro or Max and only want to run this locally:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude login                  # browser opens, sign in
+```
+
+Leave `ANTHROPIC_API_KEY` **unset** (or commented out) in `.env`. The app's `/api/chat` route detects the missing key and falls back to the Claude Agent SDK, which reuses your `claude login` credentials. No API billing.
+
+On Windows the install + login is the same, just run them in cmd / PowerShell.
+
+> Note: this is fine for personal local use. If you turn the app into something hosted for others, you'll need an API key — subscription auth is per-user.
+
+### Start the dev server
+
+```bash
 npm run dev
 ```
 
-Open <http://localhost:3000>. **Use Chrome or Edge** — Web Speech API isn't supported in Firefox/Safari yet.
+Open <http://localhost:3000> in **Chrome or Edge** (Web Speech API isn't in Firefox/Safari).
 
 ## Cost
 
-`claude-opus-4-7` is the most capable model and the default. With a 30-min/day conversation habit you'll spend a few dollars a month. If that's too much, swap to `claude-sonnet-4-6` in `src/lib/claude.ts` — for English coaching, Sonnet handles it just fine.
-
-The system prompt is cached (`cache_control: ephemeral`), so each conversational turn after the first only pays for the new user text + response.
+| Option | Per-month cost (30 min/day chat) |
+|---|---|
+| Anthropic API + `claude-opus-4-7` | ~$3–8 |
+| Anthropic API + `claude-sonnet-4-6` (set in `src/lib/claude.ts`) | ~$1–3 |
+| Pro/Max subscription via Agent SDK | $0 extra (subscription counts) |
 
 ## Future: YouTube import for Shadowing
 
@@ -42,10 +70,10 @@ The current shadowing flow accepts pasted scripts. To support `yt-dlp` import:
 3. Use the subtitle timestamps to populate `start_ms` / `end_ms` on `shadowing_sentences`.
 4. Serve audio chunks via a new `/api/shadowing/<id>/audio/<idx>` route and play them in the session UI.
 
-## Pricing the upgrade path
+## Other paid upgrade paths
 
-| Mode | Free tier (default) | Paid upgrade |
-|------|---------------------|--------------|
-| STT  | Web Speech API      | Whisper API (`~$0.006/min`) |
+| Mode | Default (free) | Upgrade |
+|------|----------------|---------|
+| STT  | Web Speech API | Whisper API (`~$0.006/min`) |
 | TTS  | browser SpeechSynthesis | OpenAI TTS (`~$15/1M chars`) |
-| Pronunciation | none (browser can't do phonemes) | Azure Speech (free tier `~5h/month`) |
+| Pronunciation | none (browser can't do phonemes) | Azure Speech (free tier ~5h/month) |

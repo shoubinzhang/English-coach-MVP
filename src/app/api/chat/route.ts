@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getClient, MODEL, COACH_SYSTEM_PROMPT, COACH_SCHEMA } from "@/lib/claude";
+import { coach } from "@/lib/claude";
 import { getDb, tx } from "@/lib/db";
-import type { ChatTurn, CoachReply } from "@/lib/types";
+import type { ChatTurn } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -14,38 +14,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "empty userText" }, { status: 400 });
   }
 
-  const client = getClient();
-  const messages = [
-    ...history.map((t) => ({ role: t.role, content: t.content })),
-    { role: "user" as const, content: userText },
-  ];
-
-  const resp = await client.messages.create({
-    model: MODEL,
-    max_tokens: 1024,
-    system: [
-      {
-        type: "text",
-        text: COACH_SYSTEM_PROMPT,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
-    output_config: {
-      format: { type: "json_schema", schema: COACH_SCHEMA },
-    },
-    messages,
-  });
-
-  const textBlock = resp.content.find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") {
-    return NextResponse.json({ error: "no text response" }, { status: 500 });
-  }
-
-  let parsed: CoachReply;
+  let parsed;
   try {
-    parsed = JSON.parse(textBlock.text) as CoachReply;
-  } catch {
-    return NextResponse.json({ error: "bad JSON from model", raw: textBlock.text }, { status: 502 });
+    parsed = await coach(history, userText);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: msg }, { status: 502 });
   }
 
   if (parsed.corrections?.length) {
