@@ -1,5 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import path from "node:path";
+import fs from "node:fs";
 import type { ChatTurn, CoachReply } from "./types";
 
 export const MODEL = "claude-opus-4-7";
@@ -83,6 +85,32 @@ async function coachViaAPI(history: ChatTurn[], userText: string): Promise<Coach
   return JSON.parse(text.text) as CoachReply;
 }
 
+// Compute the absolute path to the bundled `claude` binary that ships with
+// @anthropic-ai/claude-agent-sdk as an optional dependency. Next.js / webpack
+// breaks the SDK's own resolution (which uses import.meta.url) so we hand it
+// an explicit path it can spawn.
+function resolveBundledClaudeBinary(): string | undefined {
+  const platform = process.platform; // "win32" | "darwin" | "linux"
+  const arch = process.arch; // "x64" | "arm64"
+  const binName = platform === "win32" ? "claude.exe" : "claude";
+
+  const candidates =
+    platform === "linux"
+      ? [
+          `@anthropic-ai/claude-agent-sdk-linux-${arch}`,
+          `@anthropic-ai/claude-agent-sdk-linux-${arch}-musl`,
+        ]
+      : [`@anthropic-ai/claude-agent-sdk-${platform}-${arch}`];
+
+  for (const pkg of candidates) {
+    const p = path.join(process.cwd(), "node_modules", pkg, binName);
+    if (fs.existsSync(p)) return p;
+  }
+  return undefined;
+}
+
+const CLAUDE_BIN = resolveBundledClaudeBinary();
+
 async function coachViaAgentSDK(history: ChatTurn[], userText: string): Promise<CoachReply> {
   const transcript =
     history.length === 0
@@ -103,6 +131,7 @@ Return ONLY a JSON object on a single line. No prose, no markdown, no \`\`\` fen
     prompt: fullPrompt,
     options: {
       model: MODEL,
+      pathToClaudeCodeExecutable: CLAUDE_BIN,
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
@@ -123,6 +152,7 @@ Return ONLY a JSON object on a single line. No prose, no markdown, no \`\`\` fen
       ],
       maxTurns: 1,
       permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
     },
   })) {
     if (message.type === "result" && message.subtype === "success") {
