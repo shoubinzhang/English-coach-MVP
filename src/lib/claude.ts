@@ -51,8 +51,12 @@ const COACH_SCHEMA = {
 } as const;
 
 export async function coach(history: ChatTurn[], userText: string): Promise<CoachReply> {
-  // Path A: direct Anthropic API (if key present) — gets schema-enforced output.
-  if (process.env.ANTHROPIC_API_KEY) {
+  // Path A: direct Anthropic API — only when ANTHROPIC_API_KEY looks like a
+  // real key. A stray env var (Windows system var, Claude Enterprise tooling,
+  // an OAuth token leaked into env) shouldn't accidentally trigger it.
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  // Length guard rejects "sk-ant-..." placeholders. Real keys are ~95 chars.
+  if (apiKey && /^sk-ant-[a-zA-Z0-9_-]{40,}$/.test(apiKey)) {
     return coachViaAPI(history, userText);
   }
   // Path B: Claude Agent SDK using local `claude login` subscription auth.

@@ -5,6 +5,11 @@ import type { ChatTurn } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+const usingAPI = /^sk-ant-[a-zA-Z0-9_-]{40,}$/.test(process.env.ANTHROPIC_API_KEY ?? "");
+console.log(
+  `[coach] auth: ${usingAPI ? "Anthropic API key" : "Claude Agent SDK (claude login)"}`,
+);
+
 export async function POST(req: NextRequest) {
   const { history, userText } = (await req.json()) as {
     history: ChatTurn[];
