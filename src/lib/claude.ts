@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import path from "node:path";
 import fs from "node:fs";
 import type { ChatTurn, CoachReply } from "./types";
@@ -53,15 +54,16 @@ const COACH_SCHEMA = {
 } as const;
 
 export async function coach(history: ChatTurn[], userText: string): Promise<CoachReply> {
-  // Path A: direct Anthropic API — only when ANTHROPIC_API_KEY looks like a
-  // real key. A stray env var (Windows system var, Claude Enterprise tooling,
-  // an OAuth token leaked into env) shouldn't accidentally trigger it.
+  // Path order: Gemini → Anthropic API key → Claude Agent SDK.
+  // Gemini gets the simplest free path so most users land here.
+  if (process.env.GEMINI_API_KEY) {
+    return coachViaGemini(history, userText);
+  }
   const apiKey = process.env.ANTHROPIC_API_KEY;
   // Length guard rejects "sk-ant-..." placeholders. Real keys are ~95 chars.
   if (apiKey && /^sk-ant-[a-zA-Z0-9_-]{40,}$/.test(apiKey)) {
     return coachViaAPI(history, userText);
   }
-  // Path B: Claude Agent SDK using local `claude login` subscription auth.
   return coachViaAgentSDK(history, userText);
 }
 
@@ -163,6 +165,61 @@ Return ONLY a JSON object on a single line. No prose, no markdown, no \`\`\` fen
   if (!result) throw new Error("Agent SDK returned no result");
   return parseCoachJSON(result);
 }
+
+// ---- Gemini path -----------------------------------------------------------
+
+const GEMINI_MODEL = "gemini-2.5-flash";
+
+const GEMINI_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    reply: { type: SchemaType.STRING },
+    corrections: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          original: { type: SchemaType.STRING },
+          corrected: { type: SchemaType.STRING },
+          category: {
+            type: SchemaType.STRING,
+            enum: ["grammar", "word_choice", "naturalness", "pronunciation", "other"],
+          },
+          explanation: { type: SchemaType.STRING },
+        },
+        required: ["original", "corrected", "category", "explanation"],
+      },
+    },
+  },
+  required: ["reply", "corrections"],
+};
+
+let _gemini: GoogleGenerativeAI | null = null;
+async function coachViaGemini(history: ChatTurn[], userText: string): Promise<CoachReply> {
+  if (!_gemini) _gemini = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+  const model = _gemini.getGenerativeModel({
+    model: GEMINI_MODEL,
+    systemInstruction: COACH_SYSTEM_PROMPT,
+    generationConfig: {
+      responseMimeType: "application/json",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      responseSchema: GEMINI_SCHEMA as any,
+    },
+  });
+  // Gemini wants Content[] with parts. Use 'user'/'model' roles.
+  const contents = [
+    ...history.map((t) => ({
+      role: t.role === "assistant" ? "model" : "user",
+      parts: [{ text: t.content }],
+    })),
+    { role: "user", parts: [{ text: userText }] },
+  ];
+  const resp = await model.generateContent({ contents });
+  const text = resp.response.text();
+  return parseCoachJSON(text);
+}
+
+// ---- shared JSON parsing ---------------------------------------------------
 
 function parseCoachJSON(text: string): CoachReply {
   let s = text.trim();

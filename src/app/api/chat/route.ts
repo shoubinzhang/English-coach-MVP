@@ -5,10 +5,13 @@ import type { ChatTurn } from "@/lib/types";
 
 export const runtime = "nodejs";
 
-const usingAPI = /^sk-ant-[a-zA-Z0-9_-]{40,}$/.test(process.env.ANTHROPIC_API_KEY ?? "");
-console.log(
-  `[coach] auth: ${usingAPI ? "Anthropic API key" : "Claude Agent SDK (claude login)"}`,
-);
+const authPath = (() => {
+  if (process.env.GEMINI_API_KEY) return "Gemini (gemini-2.5-flash)";
+  if (/^sk-ant-[a-zA-Z0-9_-]{40,}$/.test(process.env.ANTHROPIC_API_KEY ?? ""))
+    return "Anthropic API key (claude-opus-4-7)";
+  return "Claude Agent SDK (claude login)";
+})();
+console.log(`[coach] auth: ${authPath}`);
 
 export async function POST(req: NextRequest) {
   const { history, userText } = (await req.json()) as {
